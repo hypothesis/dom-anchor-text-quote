@@ -1,11 +1,7 @@
-import DiffMatchPatch from 'diff-match-patch'
+import search from 'approx-string-match'
 import * as textPosition from 'dom-anchor-text-position'
 
-// The DiffMatchPatch bitap has a hard 32-character pattern length limit.
-const SLICE_LENGTH = 32
-const SLICE_RE = new RegExp('(.|[\r\n]){1,' + String(SLICE_LENGTH) + '}', 'g')
-const CONTEXT_LENGTH = SLICE_LENGTH
-
+const CONTEXT_LENGTH = 32
 
 export function fromRange(root, range) {
   if (root === undefined) {
@@ -66,7 +62,7 @@ export function toRange(root, selector, options = {}) {
 }
 
 
-export function toTextPosition(root, selector, options = {}) {
+export function toTextPosition(root, selector, options = {}) { // eslint-disable-line no-unused-vars
   if (root === undefined) {
     throw new Error('missing required parameter "root"')
   }
@@ -80,79 +76,73 @@ export function toTextPosition(root, selector, options = {}) {
   }
 
   let {prefix, suffix} = selector
-  let {hint} = options
-  let dmp = new DiffMatchPatch()
+  let textContent = root.textContent
 
-  dmp.Match_Distance = root.textContent.length * 2
+  let maxErrors = Math.floor(exact.length / 10)
 
-  // Work around a hard limit of the DiffMatchPatch bitap implementation.
-  // The search pattern must be no more than SLICE_LENGTH characters.
-  let slices = exact.match(SLICE_RE)
-  let loc = (hint === undefined) ? ((root.textContent.length / 2) | 0) : hint
-  let start = Number.POSITIVE_INFINITY
-  let end = Number.NEGATIVE_INFINITY
-  let result = -1
-  let havePrefix = prefix !== undefined
-  let haveSuffix = suffix !== undefined
-  let foundPrefix = false
-
-  // If the prefix is known then search for that first.
-  if (havePrefix) {
-    result = dmp.match_main(root.textContent, prefix, loc)
-    if (result > -1) {
-      loc = result + prefix.length
-      foundPrefix = true
+  // Fast path for exact matches.
+  let wholeTarget = prefix + exact + suffix
+  let wholeTargetIdx = textContent.indexOf(wholeTarget)
+  if (wholeTargetIdx !== -1) {
+    return {
+      start: wholeTargetIdx + prefix.length,
+      end: wholeTargetIdx + prefix.length + exact.length,
     }
   }
 
-  // If we have a suffix, and the prefix wasn't found, then search for it.
-  if (haveSuffix && !foundPrefix) {
-    result = dmp.match_main(root.textContent, suffix, loc + exact.length)
-    if (result > -1) {
-      loc = result - exact.length
-    }
-  }
-
-  // Search for the first slice.
-  let firstSlice = slices.shift()
-  result = dmp.match_main(root.textContent, firstSlice, loc)
-  if (result > -1) {
-    start = result
-    loc = end = start + firstSlice.length
-  } else {
+  let matches = search(textContent, exact, maxErrors)
+  if (matches.length === 0) {
+    // No match 😞
     return null
   }
 
-  // Create a fold function that will reduce slices to positional extents.
-  let foldSlices = (acc, slice) => {
-    if (!acc) {
-      // A search for an earlier slice of the pattern failed to match.
-      return null
+  // Score a match based on the number of errors in the quote match and whether
+  // prefix and suffix matches were found.
+  let score = match => {
+    let matchScore = match.errors
+    let prefixLen = prefix ? prefix.length : 0
+    let suffixLen = suffix ? suffix.length : 0
+    let textSection = textContent.slice(match.start - prefixLen - maxErrors,
+                                        match.end + suffixLen + maxErrors)
+
+    if (prefix) {
+      let prefixMatch = search(textSection, prefix, maxErrors).length > 0
+      if (prefixMatch) {
+        matchScore += 1
+      }
     }
 
-    let result = dmp.match_main(root.textContent, slice, acc.loc)
-    if (result === -1) {
-      return null
+    if (suffix) {
+      let suffixMatch = search(textSection, suffix, maxErrors).length > 0
+      if (suffixMatch) {
+        matchScore += 1
+      }
     }
 
-    // The next slice should follow this one closely.
-    acc.loc = result + slice.length
-
-    // Expand the start and end to a quote that includes all the slices.
-    acc.start = Math.min(acc.start, result)
-    acc.end = Math.max(acc.end, result + slice.length)
-
-    return acc
+    return matchScore
   }
 
-  // Use the fold function to establish the full quote extents.
-  // Expect the slices to be close to one another.
-  // This distance is deliberately generous for now.
-  dmp.Match_Distance = 64
-  const acc = slices.reduce(foldSlices, {start, end, loc})
-  if (!acc) {
-    return null
-  }
+  // Sort matches by score.
+  matches.sort((a, b) => {
+    let scoreA = score(a)
+    let scoreB = score(b)
 
-  return {start: acc.start, end: acc.end}
+    if (scoreA !== scoreB) {
+      return scoreB - scoreA
+    }
+
+    // If matches have the same score, order by proximity to expected location
+    // (options.hint).
+
+    if (!options.hint) {
+      return 0
+    }
+
+    let distA = Math.abs(a.start - options.hint);
+    let distB = Math.abs(b.start - options.hint);
+
+    return distA - distB;
+  });
+
+  return matches[0]
 }

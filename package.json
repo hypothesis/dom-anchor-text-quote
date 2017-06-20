@@ -25,7 +25,7 @@
   },
   "homepage": "https://github.com/tilgovi/dom-anchor-text-quote",
   "dependencies": {
-    "diff-match-patch": "^1.0.0",
+    "approx-string-match": "^0.4.0",
     "dom-anchor-text-position": "^4.0.0"
   },
   "devDependencies": {
