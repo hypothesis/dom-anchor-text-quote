@@ -103,7 +103,7 @@ describe('textQuote', () => {
     })
 
     it('finds a close exact quote', () => {
-      let exact = 'commodo cites'
+      let exact = 'commodo itae'
       let range = toRange(fixture.el, {exact})
       let text = range.toString()
       assert.equal(text, 'commodo vitae')
@@ -119,7 +119,7 @@ describe('textQuote', () => {
     })
 
     it('finds a close quote using context', () => {
-      let exact = 'commodo cites'
+      let exact = 'commodo itae'
       let prefix = 'condimentum sed, '
       let suffix = ', ornare sit amet'
       let range = toRange(fixture.el, {exact, prefix, suffix})
